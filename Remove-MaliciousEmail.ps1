@@ -110,8 +110,6 @@ function get-EmailSender {
 
 function get-ContentSearchStatus {
 
-    write-host "`nSearching, please wait"
-
     countdown -timeSpan 10
 
     if ((get-complianceSearch).status -ne "Completed")
@@ -124,6 +122,7 @@ function get-ContentSearchStatus {
         {
 
             $itemCount = get-compliancesearch -Identity $Script:RandomIdentity | select -ExpandProperty items
+            write-host "`nDeleting, please wait"
             remove-ContentSearchResults
 
         }
@@ -131,8 +130,6 @@ function get-ContentSearchStatus {
 }
 
 function remove-ContentSearchResults {
-
-    write-host "`nDeleting, please wait"
 
     countdown -timeSpan 10
 
@@ -165,6 +162,8 @@ $Script:RandomIdentity = get-random -Maximum 999999
 $ComplianceSearch = new-complianceSearch -name $Script:RandomIdentity -ExchangeLocation all -ContentMatchQuery "(From:$script:SenderAddress) AND (Subject:'$script:subject')"
 
 Start-ComplianceSearch -Identity $ComplianceSearch.Identity
+
+write-host "`nSearching, please wait"
 
 get-ContentSearchStatus
 
