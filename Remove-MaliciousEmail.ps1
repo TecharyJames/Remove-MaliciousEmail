@@ -121,7 +121,6 @@ function get-ContentSearchStatus {
     else 
         {
 
-            $itemCount = get-compliancesearch -Identity $Script:RandomIdentity | select -ExpandProperty items
             write-host "`nDeleting, please wait"
             remove-ContentSearchResults
 
