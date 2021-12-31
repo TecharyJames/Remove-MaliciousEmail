@@ -22,7 +22,7 @@ if ((Test-Admin) -eq $false)  {
 
 exit
 
-}
+}  
 
 # Prints 'Techary' in ASCII
 function print-TecharyLogo {
@@ -46,12 +46,12 @@ function connect-ComplianceCentre {
 
     if (Get-Module -ListAvailable -Name ExchangeOnlineManagement) 
         {
-            write-host " "
-            write-host "Exchange online Management exists"
+            write-host "`nExchange online Management exists"
         }
     else 
         {
-
+            write-host -ForegroundColor red "`nExchange oneline management does not exist. Installing..."
+          
             Set-PSRepository -Name "PSgallery" -InstallationPolicy Trusted
             Install-Module -Name ExchangeOnlineManagement
             import-module ExchangeOnlineManagement
@@ -75,36 +75,31 @@ function CountDown() {
 
 function get-EmailSubject {
             
-    write-host " "
+    $Script:Subject = read-host "`nEnter the subject of the email. It is recommeneded this is pasted in for accuracy"
 
-    $Script:Subject = read-host "Enter the subject of the email. It is recommeneded this is pasted in for accuracy"
+    get-EmailSender
 
-    do {
-    $confirm = read-host "The subject entered is: `n$script:subject `nIs this correct? Y/N"
-    switch ($confirm)
-            {
-                Y {get-EmailSender}
-                N {get-EmailSubject}
-                default {"You didn't enter an expected response, you idiot."}
-            } 
-        } until ($confirm -eq 'Y')
 }
 
 function get-EmailSender {
 
-    write-host " "
+    $Script:SenderAddress = read-host "`nEnter the sender of the email. It is recommeneded this is pasted in for accuracy"
 
-    $Script:SenderAddress = read-host "Enter the sender of the email. It is recommeneded this is pasted in for accuracy"
+    get-infoConfirmation
+
+}
+
+function get-infoConfirmation {
 
     do {
-    $confirm = read-host "The address entered is: `n$script:SenderAddress `nIs this correct? Y/N"
-    switch ($confirm)
-            {
-                Y {}
-                N {get-EmailSender}
-                default {"You didn't enter an expected response, you idiot."}
-            } 
-        } until ($confirm -eq 'Y')
+        $confirm = read-host "`nSubject entered is: $script:subject `nSender address entered is: $script:SenderAddress `nIs this correct? Y/N"
+        switch ($confirm)
+                {
+                    Y {}
+                    N {get-EmailSubject}
+                    default {"You didn't enter an expected response, you idiot."}
+                } 
+            } until ($confirm -eq 'Y')
 
 }
 
@@ -112,7 +107,7 @@ function get-ContentSearchStatus {
 
     countdown -timeSpan 10
 
-    if ((get-complianceSearch).status -ne "Completed")
+    if ((get-complianceSearch -identity $Script:RandomIdentity).status -ne "Completed")
         {
 
             get-ContentSearchStatus
@@ -121,7 +116,11 @@ function get-ContentSearchStatus {
     else 
         {
 
-            write-host "`nDeleting, please wait"
+            $script:items = (get-complianceSearch -identity $Script:RandomIdentity).items
+            write-host "`n`n$script:items email(s) found"
+
+            write-host "`n`nDeleting $script:Items email(s), please wait"
+            new-ComplianceSearchAction -searchname $Script:RandomIdentity -purge -confirm:$false | Out-Null
             remove-ContentSearchResults
 
         }
@@ -132,7 +131,7 @@ function remove-ContentSearchResults {
 
     countdown -timeSpan 10
 
-    if ((get-complianceSearchAction).status -ne "Completed")
+    if ((get-complianceSearchAction -identity "$Script:RandomIdentity`_purge").status -ne "Completed")
     {
 
         remove-ContentSearchResults
@@ -141,7 +140,7 @@ function remove-ContentSearchResults {
 else 
     {
 
-        write-host "`nDeletion complete!"
+        write-host "`nDeletion of $script:items complete!"
 
     }
 
@@ -152,18 +151,16 @@ print-TecharyLogo
 
 connect-ComplianceCentre
 
-Write-Warning "Ensure you have the following information: `n`nThe subject of the email. `nThe original sender of the email. `n`nThese can be attained via the email headers."
+Write-Warning "Ensure you have the following information: `n`nThe subject of the email. `nThe original sender of the email. `n`nThese can be obtained via the email headers."
 
 get-EmailSubject
 
 $Script:RandomIdentity = get-random -Maximum 999999
 
-$ComplianceSearch = new-complianceSearch -name $Script:RandomIdentity -ExchangeLocation all -ContentMatchQuery "(From:$script:SenderAddress) AND (Subject:'$script:subject')"
-
-Start-ComplianceSearch -Identity $ComplianceSearch.Identity
+new-complianceSearch -name $Script:RandomIdentity -ExchangeLocation all -ContentMatchQuery "(From:$script:SenderAddress) AND (Subject:'$script:subject')" | Start-ComplianceSearch
 
 write-host "`nSearching, please wait"
 
 get-ContentSearchStatus
 
-disconnect-ExchangeOnline -Confirm:$false
+disconnect-ExchangeOnline -Confirm:$false | Out-Null
