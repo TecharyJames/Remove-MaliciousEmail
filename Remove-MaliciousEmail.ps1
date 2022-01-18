@@ -66,11 +66,11 @@ function CountDown() {
     param($timeSpan)
 
     while ($timeSpan -gt 0)
-  {
-    Write-Host '.' -NoNewline
-    $timeSpan = $timeSpan - 1
-    Start-Sleep -Seconds 1
-  }
+        {
+            Write-Host '.' -NoNewline
+            $timeSpan = $timeSpan - 1
+            Start-Sleep -Seconds 1
+        }
 }
 
 function get-EmailSubject {
