@@ -58,7 +58,7 @@ function connect-ComplianceCentre {
 
         }
 
-    Connect-IPPSSession
+    Connect-IPPSSession -InformationAction ignore -ErrorAction SilentlyContinue
 
 }
 
@@ -105,47 +105,49 @@ function get-infoConfirmation {
 
 function get-ContentSearchStatus {
 
-    countdown -timeSpan 10
-
-    if ((get-complianceSearch -identity $Script:RandomIdentity).status -ne "Completed")
+    while ((get-complianceSearch -identity $Script:RandomIdentity).status -ne "Completed")
         {
 
-            get-ContentSearchStatus
+            countdown -timeSpan 1
 
         }
-    else 
-        {
 
-            $script:items = (get-complianceSearch -identity $Script:RandomIdentity).items
-            write-host "`n`n$script:items email(s) found"
+        $script:items = (get-complianceSearch -identity $Script:RandomIdentity).items
+        write-host "`n$script:items email(s) found"
 
-            write-host "`n`nDeleting $script:Items email(s), please wait"
-            new-ComplianceSearchAction -searchname $Script:RandomIdentity -purge -confirm:$false | Out-Null
-            remove-ContentSearchResults
+        if ($script:items -ne 0)
+            {
 
-        }
+                write-host -NoNewline "`n`nDeleting $script:Items email(s), please wait"
+                new-ComplianceSearchAction -searchname $Script:RandomIdentity -purge -confirm:$false | Out-Null
+                remove-ContentSearchResults
+
+            }
+        else    
+            {
+
+                write-host "No emails found, please confirm the sender address and subject of the email"
+            
+            }
+
+
 
 }
 
 function remove-ContentSearchResults {
 
-    countdown -timeSpan 10
+    while ((get-complianceSearchAction -identity "$Script:RandomIdentity`_purge").status -ne "Completed")
+        {
 
-    if ((get-complianceSearchAction -identity "$Script:RandomIdentity`_purge").status -ne "Completed")
-    {
+            countdown -timeSpan 1
 
-        remove-ContentSearchResults
+        }
 
-    }
-else 
-    {
-
-        write-host "`nDeletion of $script:items complete!"
-
-    }
+    write-host "`nDeletion of $script:items complete!"
 
     
 }
+
 
 print-TecharyLogo
 
@@ -157,10 +159,10 @@ get-EmailSubject
 
 $Script:RandomIdentity = get-random -Maximum 999999
 
-new-complianceSearch -name $Script:RandomIdentity -ExchangeLocation all -ContentMatchQuery "(From:$script:SenderAddress) AND (Subject:'$script:subject')" | Start-ComplianceSearch
+new-complianceSearch -name $Script:RandomIdentity -ExchangeLocation all -ContentMatchQuery "(From:$script:SenderAddress) AND (Subject:$script:subject)" | Start-ComplianceSearch
 
-write-host "`nSearching, please wait"
+write-host -NoNewline "`nSearching, please wait"
 
 get-ContentSearchStatus
 
-disconnect-ExchangeOnline -Confirm:$false | Out-Null
+Disconnect-ExchangeOnline -Confirm:$false -InformationAction ignore -ErrorAction SilentlyContinue
