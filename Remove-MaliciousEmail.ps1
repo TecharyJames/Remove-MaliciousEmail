@@ -4,6 +4,7 @@
 
 # ---------------------- ELEVATE ADMIN ---------------------- 
 
+<#
 param([switch]$Elevated)
 
 function Test-Admin {
@@ -22,7 +23,7 @@ if ((Test-Admin) -eq $false)  {
 
 exit
 
-}  
+}  #>
 
 # Prints 'Techary' in ASCII
 function print-TecharyLogo {
@@ -53,7 +54,7 @@ function connect-ComplianceCentre {
             write-host -ForegroundColor red "`nExchange oneline management does not exist. Installing..."
           
             Set-PSRepository -Name "PSgallery" -InstallationPolicy Trusted
-            Install-Module -Name ExchangeOnlineManagement
+            Install-Module -Name ExchangeOnlineManagement -Scope CurrentUser
             import-module ExchangeOnlineManagement
 
         }
@@ -81,18 +82,10 @@ function get-EmailSubject {
 
 }
 
-function get-EmailSender {
-
-    $Script:SenderAddress = read-host "`nEnter the sender of the email. It is recommeneded this is pasted in for accuracy"
-
-    get-infoConfirmation
-
-}
-
 function get-infoConfirmation {
 
     do {
-        $confirm = read-host "`nSubject entered is: $script:subject `nSender address entered is: $script:SenderAddress `nIs this correct? Y/N"
+        $confirm = read-host "`nSubject entered is: $script:subject `nIs this correct? Y/N"
         switch ($confirm)
                 {
                     Y {}
@@ -153,7 +146,9 @@ print-TecharyLogo
 
 connect-ComplianceCentre
 
-Write-Warning "Ensure you have the following information: `n`nThe subject of the email. `nThe original sender of the email. `n`nThese can be obtained via the email headers."
+Write-Output "`n`n"
+
+Write-Warning "Ensure you have the subject of the email. `n`nThis can be obtained via the email headers."
 
 get-EmailSubject
 
