@@ -159,7 +159,7 @@ get-EmailSubject
 
 $Script:RandomIdentity = get-random -Maximum 999999
 
-new-complianceSearch -name $Script:RandomIdentity -ExchangeLocation all -ContentMatchQuery "(From:$script:SenderAddress) AND (Subject:$script:subject)" | Start-ComplianceSearch
+new-complianceSearch -name $Script:RandomIdentity -ExchangeLocation all -ContentMatchQuery "(Subject:$script:subject)" | Start-ComplianceSearch
 
 write-host -NoNewline "`nSearching, please wait"
 
