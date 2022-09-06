@@ -59,13 +59,13 @@ function connect-ComplianceCentre {
 
         }
 
-    Connect-IPPSSession -InformationAction ignore -ErrorAction SilentlyContinue
+    Connect-IPPSSession
 
 }
 
 function CountDown() {
     param($timeSpan)
-
+    Re: Confirmation from Accounts Payable
     while ($timeSpan -gt 0)
         {
             Write-Host '.' -NoNewline
@@ -119,7 +119,6 @@ function get-ContentSearchStatus {
         if ($script:items -ne 0)
             {
 
-                write-host -NoNewline "`n`nDeleting $script:Items email(s), please wait"
                 new-ComplianceSearchAction -searchname $Script:RandomIdentity -purge -confirm:$false | Out-Null
                 remove-ContentSearchResults
 
@@ -128,6 +127,7 @@ function get-ContentSearchStatus {
             {
 
                 write-host "No emails found, please confirm the sender address and subject of the email"
+                pause
 
             }
 
@@ -137,13 +137,15 @@ function get-ContentSearchStatus {
 
 function remove-ContentSearchResults {
 
-    $delete = read-host "Do you want to delete all $script:items emails? Y/N"
+    $delete = read-host "Do you want to delete all found email(s)? Y/N"
 
     if ($delete -eq "Y")
         {
+            write-host -NoNewline "`n`nDeleting $script:Items email(s), please wait"
 
             while ((get-complianceSearchAction -identity "$Script:RandomIdentity`_purge").status -ne "Completed")
                 {
+
 
                     countdown -timeSpan 1
 
