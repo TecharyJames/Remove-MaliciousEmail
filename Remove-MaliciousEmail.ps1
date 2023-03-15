@@ -2,28 +2,7 @@
 ## Author: James Tarran // Techary ##
 #####################################
 
-# ---------------------- ELEVATE ADMIN ----------------------
-
-<#
-param([switch]$Elevated)
-
-function Test-Admin {
-  $currentUser = New-Object Security.Principal.WindowsPrincipal $([Security.Principal.WindowsIdentity]::GetCurrent())
-  $currentUser.IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)
-}
-
-if ((Test-Admin) -eq $false)  {
-    if ($elevated)
-    {
-        # tried to elevate, did not work, aborting
-    }
-    else {
-        Start-Process powershell.exe -Verb RunAs -ArgumentList ('-noprofile -noexit -file "{0}" -elevated' -f ($myinvocation.MyCommand.Definition))
-}
-
-exit
-
-}  #>
+#REQUIRES -modules ExchangeOnlineManagement
 
 # Prints 'Techary' in ASCII
 function print-TecharyLogo {
@@ -43,29 +22,8 @@ write-host -ForegroundColor Green $logo
 
 }
 
-function connect-ComplianceCentre {
-
-    if (Get-Module -ListAvailable -Name ExchangeOnlineManagement)
-        {
-            write-host "`nExchange online Management exists"
-        }
-    else
-        {
-            write-host -ForegroundColor red "`nExchange oneline management does not exist. Installing..."
-
-            Set-PSRepository -Name "PSgallery" -InstallationPolicy Trusted
-            Install-Module -Name ExchangeOnlineManagement -Scope CurrentUser
-            import-module ExchangeOnlineManagement
-
-        }
-
-    Connect-IPPSSession
-
-}
-
 function CountDown() {
     param($timeSpan)
-    Re: Confirmation from Accounts Payable
     while ($timeSpan -gt 0)
         {
             Write-Host '.' -NoNewline
@@ -168,10 +126,9 @@ function remove-ContentSearchResults {
 
 }
 
-
 print-TecharyLogo
 
-connect-ComplianceCentre
+Connect-IPPSSession
 
 Write-Output "`n`n"
 
