@@ -85,7 +85,7 @@ function get-ContentSearchStatus {
             {
 
                 write-host "No emails found, please confirm the sender address and subject of the email"
-                pause
+                get-emailsubject
 
             }
 
