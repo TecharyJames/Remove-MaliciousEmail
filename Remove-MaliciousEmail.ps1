@@ -72,6 +72,7 @@ function get-ContentSearchStatus {
         }
 
         $script:items = (get-complianceSearch -identity $Script:RandomIdentity).items
+        [console]::beep(659, 125); [console]::beep(659, 125); [console]::beep(659, 125); [console]::beep(523, 125); [console]::beep(659, 125); [console]::beep(784, 375); [console]::beep(392, 375)
         write-host "`n$script:items email(s) found"
 
         if ($script:items -ne 0)
@@ -84,6 +85,7 @@ function get-ContentSearchStatus {
         else
             {
 
+                [console]::beep(440,500); [console]::beep(440,500); [console]::beep(440,500); [console]::beep(349,350); [console]::beep(523,150); [console]::beep(440,500); [console]::beep(349,350); [console]::beep(523,150); [console]::beep(440,1000);
                 write-host "No emails found, please confirm the sender address and subject of the email"
                 get-emailsubject
 
