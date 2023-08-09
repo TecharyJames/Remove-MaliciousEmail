@@ -24,13 +24,25 @@ write-host -ForegroundColor Green $logo
 
 function CountDown() {
     param($timeSpan)
+
+    $spinner = @('|', '/', '-', '\')
+    $colors = @("Red", "DarkRed", "Magenta", "DarkMagenta", "Blue", "DarkBlue", "Cyan", "DarkCyan", "Green", "DarkGreen", "Yellow", "DarkYellow", "White", "Gray", "DarkGray", "Black")
+    $colorIndex = 0
+
     while ($timeSpan -gt 0)
         {
-            Write-Host '.' -NoNewline
+            foreach ($spin in $spinner) {
+                Write-Host "`r$spin" -NoNewline -ForegroundColor $colors[$colorIndex]
+                Start-Sleep -Milliseconds 90
+            }
+            $colorIndex++
+            if ($colorIndex -ge $colors.Length) {
+                $colorIndex = 0
+            }
             $timeSpan = $timeSpan - 1
-            Start-Sleep -Seconds 1
         }
 }
+
 
 function get-EmailSubject {
 
