@@ -26,23 +26,22 @@ function CountDown() {
     param($timeSpan)
 
     $spinner = @('|', '/', '-', '\')
-    $colors = @("Red", "DarkRed", "Magenta", "DarkMagenta", "Blue", "DarkBlue", "Cyan", "DarkCyan", "Green", "DarkGreen", "Yellow", "DarkYellow", "White", "Gray", "DarkGray", "Black")
-    $colorIndex = 0
+    $colours = @("Red", "DarkRed", "Magenta", "DarkMagenta", "Blue", "DarkBlue", "Cyan", "DarkCyan", "Green", "DarkGreen", "Yellow", "DarkYellow", "White", "Gray", "DarkGray", "Black")
+    $colourIndex = 0
 
     while ($timeSpan -gt 0)
         {
             foreach ($spin in $spinner) {
-                Write-Host "`r$spin" -NoNewline -ForegroundColor $colors[$colorIndex]
+                Write-Host "`r$spin" -NoNewline -ForegroundColor $colours[$colourIndex]
                 Start-Sleep -Milliseconds 90
             }
-            $colorIndex++
-            if ($colorIndex -ge $colors.Length) {
-                $colorIndex = 0
+            $colourIndex++
+            if ($colourIndex -ge $colours.Length) {
+                $colourIndex = 0
             }
             $timeSpan = $timeSpan - 1
         }
 }
-
 
 function get-EmailSubject {
 
@@ -79,7 +78,7 @@ function get-ContentSearchStatus {
     while ((get-complianceSearch -identity $Script:RandomIdentity).status -ne "Completed")
         {
 
-            countdown -timeSpan 1
+            countdown -timeSpan 5
 
         }
 
@@ -113,13 +112,13 @@ function remove-ContentSearchResults {
 
     if ($delete -eq "Y")
         {
-            write-host -NoNewline "`n`nDeleting $script:Items email(s), please wait"
+            write-host "`n`nDeleting $script:Items email(s), please wait"
 
             while ((get-complianceSearchAction -identity "$Script:RandomIdentity`_purge").status -ne "Completed")
                 {
 
 
-                    countdown -timeSpan 1
+                    countdown -timeSpan 5
 
                 }
 
@@ -154,7 +153,7 @@ $Script:RandomIdentity = get-random -Maximum 999999
 
 new-complianceSearch -name $Script:RandomIdentity -ExchangeLocation all -ContentMatchQuery "(From:$script:SenderAddress) AND (Subject:$script:subject)" | Start-ComplianceSearch
 
-write-host -NoNewline "`nSearching, please wait"
+write-host "`nSearching, please wait"
 
 get-ContentSearchStatus
 
