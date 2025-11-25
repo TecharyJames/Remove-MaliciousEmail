@@ -2,7 +2,11 @@
 ## Author: James Tarran // Techary ##
 #####################################
 
-#REQUIRES -modules ExchangeOnlineManagement
+$module = get-module ExchangeOnlineManagement
+if ($null -eq $module) {
+    install-module -name ExchangeOnlineManagement -scope CurrentUser
+    import-module ExchangeOnlineManagement
+}
 
 # Prints 'Techary' in ASCII
 function print-TecharyLogo {
@@ -85,7 +89,8 @@ function remove-ContentSearchResults {
         while ((get-complianceSearchAction -identity "$Script:RandomIdentity`_purge").status -ne "Completed") {
             countdown -timeSpan 5
         }
-        write-host "`nDeletion of $script:items emails complete!"
+        write-host "`nDeletion of $script:items emails complete! `nScreenshot this message and paste it into the ticket"
+        pause
     } elseif ($delete -eq "N") {
 
     }
