@@ -2,15 +2,156 @@
 ## Author: James Tarran // Techary ##
 #####################################
 
-# Check and import Exchange Online Management module
+<#
+.SYNOPSIS
+    Searches and removes malicious/phishing emails from all Microsoft 365 mailboxes.
+
+.DESCRIPTION
+    A PowerShell tool for IT administrators to search and purge emails across an entire
+    Microsoft 365 organization using Compliance Search. Supports wildcard matching,
+    date filtering, CSV export, and detailed logging.
+
+.PARAMETER Subject
+    The email subject to search for. Use * for wildcards. Separate multiple with commas.
+
+.PARAMETER Sender
+    The sender email address to search for. Use * for wildcards. Separate multiple with commas.
+
+.PARAMETER Recipient
+    Filter by recipient email address. Optional.
+
+.PARAMETER AttachmentName
+    Filter by attachment filename. Use * for wildcards. Optional.
+
+.PARAMETER StartDate
+    Search for emails received on or after this date. Format: yyyy-MM-dd
+
+.PARAMETER EndDate
+    Search for emails received on or before this date. Format: yyyy-MM-dd
+
+.PARAMETER Last24Hours
+    Search only emails received in the last 24 hours.
+
+.PARAMETER Last7Days
+    Search only emails received in the last 7 days.
+
+.PARAMETER ExcludeMailboxes
+    Comma-separated list of mailboxes to exclude from search.
+
+.PARAMETER ExportPath
+    Path to export results CSV. Defaults to script directory.
+
+.PARAMETER LogPath
+    Path for log file. Defaults to script directory.
+
+.PARAMETER HardDelete
+    Permanently delete emails instead of soft delete.
+
+.PARAMETER PreviewOnly
+    Search and preview results without deleting.
+
+.PARAMETER NonInteractive
+    Run without prompts (requires all parameters to be specified).
+
+.EXAMPLE
+    .\Remove-MaliciousEmail.ps1
+    Runs in interactive mode with menus.
+
+.EXAMPLE
+    .\Remove-MaliciousEmail.ps1 -Subject "*invoice*" -Sender "*@malicious.com" -Last24Hours -PreviewOnly
+    Preview emails matching criteria from last 24 hours.
+
+.EXAMPLE
+    .\Remove-MaliciousEmail.ps1 -Subject "Urgent Payment" -Sender "attacker@bad.com" -StartDate "2024-01-01" -EndDate "2024-01-31" -NonInteractive
+    Non-interactive search within date range.
+#>
+
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory = $false)]
+    [string]$Subject,
+
+    [Parameter(Mandatory = $false)]
+    [string]$Sender,
+
+    [Parameter(Mandatory = $false)]
+    [string]$Recipient,
+
+    [Parameter(Mandatory = $false)]
+    [string]$AttachmentName,
+
+    [Parameter(Mandatory = $false)]
+    [datetime]$StartDate,
+
+    [Parameter(Mandatory = $false)]
+    [datetime]$EndDate,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$Last24Hours,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$Last7Days,
+
+    [Parameter(Mandatory = $false)]
+    [string]$ExcludeMailboxes,
+
+    [Parameter(Mandatory = $false)]
+    [string]$ExportPath,
+
+    [Parameter(Mandatory = $false)]
+    [string]$LogPath,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$HardDelete,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$PreviewOnly,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$NonInteractive
+)
+
+# ===== Initialize Paths =====
+$ScriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
+if ([string]::IsNullOrEmpty($ScriptDirectory)) { $ScriptDirectory = Get-Location }
+
+if ([string]::IsNullOrEmpty($ExportPath)) { $ExportPath = $ScriptDirectory }
+if ([string]::IsNullOrEmpty($LogPath)) { $LogPath = $ScriptDirectory }
+
+$Script:LogFile = Join-Path $LogPath "Remove-MaliciousEmail_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
+
+# ===== Logging Function =====
+function Write-Log {
+    param(
+        [string]$Message,
+        [ValidateSet("INFO", "WARN", "ERROR", "SUCCESS")]
+        [string]$Level = "INFO"
+    )
+
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $logEntry = "[$timestamp] [$Level] $Message"
+
+    # Write to log file
+    Add-Content -Path $Script:LogFile -Value $logEntry -ErrorAction SilentlyContinue
+
+    # Write to console with color
+    switch ($Level) {
+        "INFO"    { Write-Host $Message -ForegroundColor White }
+        "WARN"    { Write-Host $Message -ForegroundColor Yellow }
+        "ERROR"   { Write-Host $Message -ForegroundColor Red }
+        "SUCCESS" { Write-Host $Message -ForegroundColor Green }
+    }
+}
+
+# ===== Module Check =====
 $module = Get-Module -Name ExchangeOnlineManagement -ListAvailable
 if ($null -eq $module) {
-    Write-Host "Installing ExchangeOnlineManagement module..." -ForegroundColor Yellow
+    Write-Log "Installing ExchangeOnlineManagement module..." -Level WARN
     Install-Module -Name ExchangeOnlineManagement -Scope CurrentUser -Force
 }
 Import-Module ExchangeOnlineManagement -ErrorAction Stop
 
-# Prints 'Techary' in ASCII
+# ===== ASCII Logo =====
 function Print-TecharyLogo {
     $logo = @"
      _______        _
@@ -25,28 +166,29 @@ function Print-TecharyLogo {
     Write-Host -ForegroundColor Green $logo
 }
 
-function CountDown {
-    param($timeSpan)
+# ===== Progress Spinner =====
+function Show-Progress {
+    param(
+        [string]$Activity,
+        [int]$SecondsToWait = 5
+    )
+
     $spinner = @('|', '/', '-', '\')
-    $colours = @("Red", "DarkRed", "Magenta", "DarkMagenta", "Blue", "DarkBlue", "Cyan", "DarkCyan", "Green", "DarkGreen", "Yellow", "DarkYellow", "White", "Gray", "DarkGray")
-    $colourIndex = 0
-    while ($timeSpan -gt 0) {
-        foreach ($spin in $spinner) {
-            Write-Host "`r$spin" -NoNewline -ForegroundColor $colours[$colourIndex]
-            Start-Sleep -Milliseconds 90
-        }
-        $colourIndex++
-        if ($colourIndex -ge $colours.Length) {
-            $colourIndex = 0
-        }
-        $timeSpan = $timeSpan - 1
+    $spinIndex = 0
+
+    for ($i = 0; $i -lt ($SecondsToWait * 4); $i++) {
+        Write-Host "`r$Activity $($spinner[$spinIndex])" -NoNewline -ForegroundColor Cyan
+        Start-Sleep -Milliseconds 250
+        $spinIndex = ($spinIndex + 1) % 4
     }
+    Write-Host "`r$Activity   " -NoNewline
 }
 
+# ===== Menu Functions =====
 function Get-SearchType {
     Write-Host "`n===== Search Type Selection =====" -ForegroundColor Cyan
-    Write-Host "1. Exact Match   - Search for exact subject/sender (recommended for specific emails)"
-    Write-Host "2. Wildcard      - Use * for partial matches (e.g., *invoice*, *@malicious.com)"
+    Write-Host "1. Exact Match   - Search for exact subject/sender"
+    Write-Host "2. Wildcard      - Use * for partial matches (e.g., *invoice*, *@domain.com)"
     Write-Host "=================================" -ForegroundColor Cyan
 
     do {
@@ -59,13 +201,62 @@ function Get-SearchType {
     } until ($choice -eq "1" -or $choice -eq "2")
 }
 
+function Get-DateFilter {
+    Write-Host "`n===== Date Range Filter =====" -ForegroundColor Cyan
+    Write-Host "1. All time        - Search all emails (no date filter)"
+    Write-Host "2. Last 24 hours   - Emails received in the last day"
+    Write-Host "3. Last 7 days     - Emails received in the last week"
+    Write-Host "4. Last 30 days    - Emails received in the last month"
+    Write-Host "5. Custom range    - Specify start and end dates"
+    Write-Host "==============================" -ForegroundColor Cyan
+
+    do {
+        $choice = Read-Host "`nSelect date range (1-5)"
+        switch ($choice) {
+            "1" {
+                $Script:StartDate = $null
+                $Script:EndDate = $null
+                return
+            }
+            "2" {
+                $Script:StartDate = (Get-Date).AddDays(-1)
+                $Script:EndDate = Get-Date
+                return
+            }
+            "3" {
+                $Script:StartDate = (Get-Date).AddDays(-7)
+                $Script:EndDate = Get-Date
+                return
+            }
+            "4" {
+                $Script:StartDate = (Get-Date).AddDays(-30)
+                $Script:EndDate = Get-Date
+                return
+            }
+            "5" {
+                $startInput = Read-Host "Enter start date (yyyy-MM-dd)"
+                $endInput = Read-Host "Enter end date (yyyy-MM-dd)"
+                try {
+                    $Script:StartDate = [datetime]::ParseExact($startInput, "yyyy-MM-dd", $null)
+                    $Script:EndDate = [datetime]::ParseExact($endInput, "yyyy-MM-dd", $null)
+                    return
+                } catch {
+                    Write-Host "Invalid date format. Please use yyyy-MM-dd" -ForegroundColor Red
+                }
+            }
+            default { Write-Host "Please enter 1-5" -ForegroundColor Yellow }
+        }
+    } until ($false)
+}
+
 function Get-EmailSubject {
     Write-Host ""
     if ($Script:SearchType -eq "Wildcard") {
         Write-Host "Wildcard Tips: Use * for partial matches" -ForegroundColor Yellow
         Write-Host "  Examples: *invoice*  |  *urgent payment*  |  Your account*" -ForegroundColor Gray
+        Write-Host "  Multiple: invoice,payment,urgent (comma-separated)" -ForegroundColor Gray
     }
-    $Script:Subject = Read-Host "`nEnter the subject of the email (paste recommended for accuracy)"
+    $Script:Subject = Read-Host "`nEnter the subject of the email (comma-separate for multiple)"
 
     if ([string]::IsNullOrWhiteSpace($Script:Subject)) {
         Write-Host "Subject cannot be empty. Please try again." -ForegroundColor Red
@@ -80,22 +271,43 @@ function Get-EmailSender {
     if ($Script:SearchType -eq "Wildcard") {
         Write-Host "Wildcard Tips: Use * for partial matches" -ForegroundColor Yellow
         Write-Host "  Examples: *@malicious.com  |  attacker*  |  *phish*" -ForegroundColor Gray
+        Write-Host "  Multiple: bad@evil.com,*@phish.com (comma-separated)" -ForegroundColor Gray
     }
-    $Script:SenderAddress = Read-Host "`nEnter the sender email address (paste recommended for accuracy)"
+    $Script:SenderAddress = Read-Host "`nEnter the sender email address (comma-separate for multiple)"
 
     if ([string]::IsNullOrWhiteSpace($Script:SenderAddress)) {
         Write-Host "Sender address cannot be empty. Please try again." -ForegroundColor Red
         Get-EmailSender
         return
     }
+    Get-OptionalFilters
+}
+
+function Get-OptionalFilters {
+    Write-Host "`n===== Optional Filters =====" -ForegroundColor Cyan
+    Write-Host "Press Enter to skip any optional filter"
+    Write-Host "=============================" -ForegroundColor Cyan
+
+    $Script:Recipient = Read-Host "`nFilter by recipient (optional)"
+    $Script:AttachmentName = Read-Host "Filter by attachment name (optional, e.g., *.exe, invoice.pdf)"
+    $Script:ExcludeMailboxes = Read-Host "Exclude mailboxes (optional, comma-separated)"
+
     Get-InfoConfirmation
 }
 
 function Get-InfoConfirmation {
+    $dateRange = if ($Script:StartDate -and $Script:EndDate) {
+        "$($Script:StartDate.ToString('yyyy-MM-dd')) to $($Script:EndDate.ToString('yyyy-MM-dd'))"
+    } else { "All time" }
+
     Write-Host "`n===== Search Summary =====" -ForegroundColor Cyan
-    Write-Host "Search Type: $Script:SearchType"
-    Write-Host "Subject:     $Script:Subject"
-    Write-Host "Sender:      $Script:SenderAddress"
+    Write-Host "Search Type:    $Script:SearchType"
+    Write-Host "Subject:        $Script:Subject"
+    Write-Host "Sender:         $Script:SenderAddress"
+    Write-Host "Date Range:     $dateRange"
+    if ($Script:Recipient) { Write-Host "Recipient:      $Script:Recipient" }
+    if ($Script:AttachmentName) { Write-Host "Attachment:     $Script:AttachmentName" }
+    if ($Script:ExcludeMailboxes) { Write-Host "Excluded:       $Script:ExcludeMailboxes" }
     Write-Host "==========================" -ForegroundColor Cyan
 
     do {
@@ -108,116 +320,345 @@ function Get-InfoConfirmation {
     } until ($confirm.ToUpper() -eq "Y")
 }
 
-function Build-ContentMatchQuery {
-    $subjectQuery = $Script:Subject
-    $senderQuery = $Script:SenderAddress
+function Get-DeleteType {
+    Write-Host "`n===== Deletion Type =====" -ForegroundColor Cyan
+    Write-Host "1. Soft Delete (Recommended) - Moves to Recoverable Items, can be restored"
+    Write-Host "2. Hard Delete               - Permanently deletes, cannot be recovered"
+    Write-Host "==========================" -ForegroundColor Cyan
 
-    # For wildcard searches, ensure proper KQL syntax
-    if ($Script:SearchType -eq "Wildcard") {
-        # KQL uses * for wildcards - user should include them in their input
-        # We just need to ensure proper quoting for phrases with spaces
-        if ($subjectQuery -match '\s' -and $subjectQuery -notmatch '^\*.*\*$') {
-            # Contains spaces but isn't wrapped in wildcards on both sides
-            $subjectQuery = "`"$subjectQuery`""
+    do {
+        $choice = Read-Host "`nSelect deletion type (1 or 2)"
+        switch ($choice) {
+            "1" { return "SoftDelete" }
+            "2" {
+                $confirm = Read-Host "Are you sure? Hard delete cannot be undone (YES to confirm)"
+                if ($confirm -eq "YES") { return "HardDelete" }
+                else { Write-Host "Hard delete cancelled. Using soft delete." -ForegroundColor Yellow; return "SoftDelete" }
+            }
+            default { Write-Host "Please enter 1 or 2" -ForegroundColor Yellow }
         }
-    } else {
-        # Exact match - quote the values to search as phrases
-        $subjectQuery = "`"$subjectQuery`""
-        $senderQuery = "`"$senderQuery`""
-    }
-
-    return "(From:$senderQuery) AND (Subject:$subjectQuery)"
+    } until ($false)
 }
 
-function Get-ContentSearchStatus {
-    Write-Host "`nWaiting for search to complete..." -ForegroundColor Yellow
+# ===== Query Building =====
+function Build-ContentMatchQuery {
+    $queryParts = @()
+
+    # Build subject query (support multiple with OR)
+    $subjects = $Script:Subject -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ }
+    $subjectQueries = @()
+    foreach ($subj in $subjects) {
+        if ($Script:SearchType -eq "Exact") {
+            $subjectQueries += "Subject:`"$subj`""
+        } else {
+            $subjectQueries += "Subject:$subj"
+        }
+    }
+    if ($subjectQueries.Count -gt 1) {
+        $queryParts += "(" + ($subjectQueries -join " OR ") + ")"
+    } else {
+        $queryParts += $subjectQueries[0]
+    }
+
+    # Build sender query (support multiple with OR)
+    $senders = $Script:SenderAddress -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ }
+    $senderQueries = @()
+    foreach ($sndr in $senders) {
+        if ($Script:SearchType -eq "Exact") {
+            $senderQueries += "From:`"$sndr`""
+        } else {
+            $senderQueries += "From:$sndr"
+        }
+    }
+    if ($senderQueries.Count -gt 1) {
+        $queryParts += "(" + ($senderQueries -join " OR ") + ")"
+    } else {
+        $queryParts += $senderQueries[0]
+    }
+
+    # Add recipient filter
+    if ($Script:Recipient) {
+        $queryParts += "To:$($Script:Recipient)"
+    }
+
+    # Add attachment filter
+    if ($Script:AttachmentName) {
+        $queryParts += "Attachment:$($Script:AttachmentName)"
+    }
+
+    # Add date range filter
+    if ($Script:StartDate) {
+        $queryParts += "Received>=$($Script:StartDate.ToString('yyyy-MM-dd'))"
+    }
+    if ($Script:EndDate) {
+        $queryParts += "Received<=$($Script:EndDate.ToString('yyyy-MM-dd'))"
+    }
+
+    return ($queryParts -join " AND ")
+}
+
+# ===== Export Function =====
+function Export-SearchResults {
+    param([string]$SearchName)
 
     try {
-        $maxAttempts = 120  # 10 minute timeout (120 * 5 seconds)
+        Write-Log "Exporting search results to CSV..." -Level INFO
+
+        # Create export action
+        $exportActionName = "${SearchName}_Export"
+        New-ComplianceSearchAction -SearchName $SearchName -Preview | Out-Null
+
+        # Wait for preview to complete
+        $maxAttempts = 60
+        $attempts = 0
+        while ((Get-ComplianceSearchAction -Identity "${SearchName}_Preview" -ErrorAction SilentlyContinue).Status -ne "Completed") {
+            Show-Progress -Activity "Generating preview" -SecondsToWait 2
+            $attempts++
+            if ($attempts -ge $maxAttempts) {
+                Write-Log "Preview generation timed out" -Level WARN
+                return $null
+            }
+        }
+
+        # Get preview results
+        $previewResults = (Get-ComplianceSearchAction -Identity "${SearchName}_Preview").Results
+
+        if ($previewResults) {
+            $csvPath = Join-Path $ExportPath "EmailSearch_${SearchName}_$(Get-Date -Format 'yyyyMMdd_HHmmss').csv"
+
+            # Parse and export results
+            $parsedResults = @()
+            $resultLines = $previewResults -split ';'
+
+            foreach ($line in $resultLines) {
+                if ($line -match "Location:\s*(.+?),\s*Item count:\s*(\d+),\s*Total size:\s*(\d+)") {
+                    $parsedResults += [PSCustomObject]@{
+                        Mailbox    = $matches[1].Trim()
+                        ItemCount  = [int]$matches[2]
+                        TotalSize  = [int]$matches[3]
+                        SearchName = $SearchName
+                        SearchDate = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+                        Subject    = $Script:Subject
+                        Sender     = $Script:SenderAddress
+                    }
+                }
+            }
+
+            if ($parsedResults.Count -gt 0) {
+                $parsedResults | Export-Csv -Path $csvPath -NoTypeInformation
+                Write-Log "Results exported to: $csvPath" -Level SUCCESS
+                return $csvPath
+            }
+        }
+
+        Write-Log "No detailed results available for export" -Level WARN
+        return $null
+    } catch {
+        Write-Log "Error exporting results: $_" -Level ERROR
+        return $null
+    }
+}
+
+# ===== Preview Function =====
+function Show-SearchPreview {
+    param([string]$SearchName)
+
+    Write-Host "`n===== Search Preview =====" -ForegroundColor Cyan
+
+    try {
+        # Check if preview action already exists
+        $previewAction = Get-ComplianceSearchAction -Identity "${SearchName}_Preview" -ErrorAction SilentlyContinue
+
+        if (-not $previewAction) {
+            New-ComplianceSearchAction -SearchName $SearchName -Preview | Out-Null
+
+            $maxAttempts = 60
+            $attempts = 0
+            while ((Get-ComplianceSearchAction -Identity "${SearchName}_Preview").Status -ne "Completed") {
+                Show-Progress -Activity "Generating preview" -SecondsToWait 2
+                $attempts++
+                if ($attempts -ge $maxAttempts) {
+                    Write-Log "Preview generation timed out" -Level WARN
+                    return
+                }
+            }
+        }
+
+        $previewResults = (Get-ComplianceSearchAction -Identity "${SearchName}_Preview").Results
+
+        if ($previewResults) {
+            Write-Host ""
+            Write-Host "Mailboxes with matching emails:" -ForegroundColor Yellow
+            Write-Host "-" * 60
+
+            $resultLines = $previewResults -split ';'
+            $displayCount = 0
+
+            foreach ($line in $resultLines) {
+                if ($line -match "Location:\s*(.+?),\s*Item count:\s*(\d+),\s*Total size:\s*(\d+)" -and $displayCount -lt 20) {
+                    $mailbox = $matches[1].Trim()
+                    $count = $matches[2]
+                    Write-Host "  $mailbox - $count item(s)" -ForegroundColor White
+                    $displayCount++
+                }
+            }
+
+            if ($resultLines.Count -gt 20) {
+                Write-Host "  ... and more (see exported CSV for full list)" -ForegroundColor Gray
+            }
+            Write-Host "-" * 60
+        } else {
+            Write-Host "No preview details available" -ForegroundColor Gray
+        }
+    } catch {
+        Write-Log "Error generating preview: $_" -Level ERROR
+    }
+}
+
+# ===== Search Functions =====
+function Get-ContentSearchStatus {
+    Write-Log "Waiting for search to complete..." -Level INFO
+
+    try {
+        $maxAttempts = 120
         $attempts = 0
 
         while ((Get-ComplianceSearch -Identity $Script:RandomIdentity).Status -ne "Completed") {
-            CountDown -timeSpan 5
+            Show-Progress -Activity "Searching mailboxes" -SecondsToWait 5
             $attempts++
+
+            # Show progress percentage if available
+            $search = Get-ComplianceSearch -Identity $Script:RandomIdentity
+            if ($search.JobProgress -gt 0) {
+                Write-Host "`rSearch progress: $($search.JobProgress)%   " -NoNewline -ForegroundColor Cyan
+            }
+
             if ($attempts -ge $maxAttempts) {
-                Write-Host "`nSearch timed out. Please check the compliance center manually." -ForegroundColor Red
+                Write-Log "Search timed out after 10 minutes. Check compliance center manually." -Level ERROR
                 return
             }
         }
 
+        Write-Host ""
         $Script:Items = (Get-ComplianceSearch -Identity $Script:RandomIdentity).Items
         $searchQuery = (Get-ComplianceSearch -Identity $Script:RandomIdentity).ContentMatchQuery
+        $searchSize = (Get-ComplianceSearch -Identity $Script:RandomIdentity).Size
+
+        # Format size
+        $sizeFormatted = if ($searchSize -gt 1GB) { "{0:N2} GB" -f ($searchSize / 1GB) }
+                         elseif ($searchSize -gt 1MB) { "{0:N2} MB" -f ($searchSize / 1MB) }
+                         elseif ($searchSize -gt 1KB) { "{0:N2} KB" -f ($searchSize / 1KB) }
+                         else { "$searchSize bytes" }
 
         # Success sound
-        [Console]::Beep(659, 125); [Console]::Beep(659, 125); [Console]::Beep(659, 125)
-        [Console]::Beep(523, 125); [Console]::Beep(659, 125); [Console]::Beep(784, 375); [Console]::Beep(392, 375)
+        [Console]::Beep(659, 125); [Console]::Beep(659, 125); [Console]::Beep(784, 375)
 
         Write-Host "`n===== Search Results =====" -ForegroundColor Green
-        Write-Host "Query Used:    $searchQuery"
+        Write-Host "Search ID:     $Script:RandomIdentity"
+        Write-Host "Query:         $searchQuery"
         Write-Host "Items Found:   $Script:Items email(s)"
+        Write-Host "Total Size:    $sizeFormatted"
         Write-Host "==========================" -ForegroundColor Green
 
+        Write-Log "Search completed. Found $Script:Items items ($sizeFormatted)" -Level SUCCESS
+
         if ($Script:Items -ne 0) {
-            New-ComplianceSearchAction -SearchName $Script:RandomIdentity -Purge -PurgeType SoftDelete -Confirm:$false | Out-Null
+            # Show preview
+            Show-SearchPreview -SearchName $Script:RandomIdentity
+
+            # Export results
+            $exportedFile = Export-SearchResults -SearchName $Script:RandomIdentity
+
+            if ($PreviewOnly) {
+                Write-Log "Preview only mode - no deletion performed" -Level INFO
+                return
+            }
+
             Remove-ContentSearchResults
         } else {
-            # No results sound
-            [Console]::Beep(440, 500); [Console]::Beep(349, 350); [Console]::Beep(440, 500)
+            [Console]::Beep(440, 500); [Console]::Beep(349, 350)
 
-            Write-Host "`nNo emails found with the specified criteria." -ForegroundColor Yellow
-            Write-Host "Tips:" -ForegroundColor Cyan
+            Write-Log "No emails found with the specified criteria." -Level WARN
+            Write-Host "`nTips:" -ForegroundColor Cyan
             Write-Host "  - Check spelling of subject and sender"
             Write-Host "  - Try using wildcard search with * for partial matches"
+            Write-Host "  - Adjust the date range"
             Write-Host "  - Verify the email hasn't already been deleted"
 
-            $retry = Read-Host "`nWould you like to search again? (Y/N)"
-            if ($retry.ToUpper() -eq "Y") {
-                Get-SearchType
-                Get-EmailSubject
-                Start-NewSearch
+            if (-not $NonInteractive) {
+                $retry = Read-Host "`nWould you like to search again? (Y/N)"
+                if ($retry.ToUpper() -eq "Y") {
+                    Get-SearchType
+                    Get-DateFilter
+                    Get-EmailSubject
+                    Start-NewSearch
+                }
             }
         }
     } catch {
-        Write-Host "Error during search: $_" -ForegroundColor Red
+        Write-Log "Error during search: $_" -Level ERROR
     }
 }
 
 function Remove-ContentSearchResults {
     Write-Host ""
-    $delete = Read-Host "Do you want to delete all $Script:Items found email(s)? (Y/N)"
 
-    switch ($delete.ToUpper()) {
+    if ($NonInteractive) {
+        $deleteConfirm = "Y"
+    } else {
+        $deleteConfirm = Read-Host "Do you want to delete all $Script:Items found email(s)? (Y/N)"
+    }
+
+    switch ($deleteConfirm.ToUpper()) {
         "Y" {
-            Write-Host "`nDeleting $Script:Items email(s), please wait..." -ForegroundColor Yellow
+            # Get deletion type
+            if ($HardDelete) {
+                $purgeType = "HardDelete"
+            } elseif ($NonInteractive) {
+                $purgeType = "SoftDelete"
+            } else {
+                $purgeType = Get-DeleteType
+            }
+
+            Write-Log "Initiating $purgeType for $Script:Items email(s)..." -Level INFO
 
             try {
+                New-ComplianceSearchAction -SearchName $Script:RandomIdentity -Purge -PurgeType $purgeType -Confirm:$false | Out-Null
+
                 $maxAttempts = 120
                 $attempts = 0
 
                 while ((Get-ComplianceSearchAction -Identity "$Script:RandomIdentity`_Purge").Status -ne "Completed") {
-                    CountDown -timeSpan 5
+                    Show-Progress -Activity "Deleting emails ($purgeType)" -SecondsToWait 5
                     $attempts++
                     if ($attempts -ge $maxAttempts) {
-                        Write-Host "`nPurge timed out. Please check the compliance center manually." -ForegroundColor Red
+                        Write-Log "Purge timed out. Check compliance center manually." -Level ERROR
                         return
                     }
                 }
 
+                Write-Host ""
                 Write-Host "`n===== Deletion Complete =====" -ForegroundColor Green
                 Write-Host "Emails Deleted: $Script:Items"
+                Write-Host "Delete Type:    $purgeType"
                 Write-Host "Search ID:      $Script:RandomIdentity"
                 Write-Host "Search Type:    $Script:SearchType"
                 Write-Host "Subject:        $Script:Subject"
                 Write-Host "Sender:         $Script:SenderAddress"
+                if ($Script:StartDate) { Write-Host "Date Range:     $($Script:StartDate.ToString('yyyy-MM-dd')) to $($Script:EndDate.ToString('yyyy-MM-dd'))" }
+                Write-Host "Log File:       $Script:LogFile"
                 Write-Host "==============================" -ForegroundColor Green
+
+                Write-Log "Deletion completed. $Script:Items emails removed using $purgeType." -Level SUCCESS
                 Write-Host "`nScreenshot this message for your records." -ForegroundColor Cyan
-                Pause
+
+                if (-not $NonInteractive) { Pause }
             } catch {
-                Write-Host "Error during deletion: $_" -ForegroundColor Red
+                Write-Log "Error during deletion: $_" -Level ERROR
             }
         }
         "N" {
-            Write-Host "Deletion cancelled. Search results preserved." -ForegroundColor Yellow
+            Write-Log "Deletion cancelled by user." -Level INFO
         }
         default {
             Write-Host "Please enter Y or N" -ForegroundColor Yellow
@@ -227,49 +668,83 @@ function Remove-ContentSearchResults {
 }
 
 function Start-NewSearch {
-    $Script:RandomIdentity = Get-Random -Maximum 999999
+    $Script:RandomIdentity = "MalEmail_" + (Get-Date -Format "yyyyMMdd_HHmmss") + "_" + (Get-Random -Maximum 9999)
     $query = Build-ContentMatchQuery
 
-    Write-Host "`nStarting compliance search..." -ForegroundColor Yellow
+    Write-Log "Starting compliance search..." -Level INFO
     Write-Host "Search ID: $Script:RandomIdentity" -ForegroundColor Gray
     Write-Host "Query: $query" -ForegroundColor Gray
 
     try {
-        New-ComplianceSearch -Name $Script:RandomIdentity -ExchangeLocation All -ContentMatchQuery $query | Start-ComplianceSearch
+        # Determine exchange locations
+        if ($Script:ExcludeMailboxes) {
+            $excludeList = $Script:ExcludeMailboxes -split ',' | ForEach-Object { $_.Trim() }
+            New-ComplianceSearch -Name $Script:RandomIdentity -ExchangeLocation All -ExchangeLocationExclusion $excludeList -ContentMatchQuery $query | Out-Null
+        } else {
+            New-ComplianceSearch -Name $Script:RandomIdentity -ExchangeLocation All -ContentMatchQuery $query | Out-Null
+        }
+
+        Start-ComplianceSearch -Identity $Script:RandomIdentity
         Get-ContentSearchStatus
     } catch {
-        Write-Host "Error creating search: $_" -ForegroundColor Red
+        Write-Log "Error creating search: $_" -Level ERROR
     }
 }
 
 # ===== Main Script Execution =====
 Print-TecharyLogo
 
-Write-Host "Connecting to Exchange Online Security & Compliance Center..." -ForegroundColor Yellow
+Write-Host "Remove Malicious Email Tool" -ForegroundColor Cyan
+Write-Host "===========================`n" -ForegroundColor Cyan
+
+Write-Log "Script started. Log file: $Script:LogFile" -Level INFO
+
+# Connect to Exchange Online
+Write-Log "Connecting to Exchange Online Security & Compliance Center..." -Level INFO
 try {
     Connect-IPPSSession -ErrorAction Stop
-    Write-Host "Connected successfully.`n" -ForegroundColor Green
+    Write-Log "Connected successfully." -Level SUCCESS
 } catch {
-    Write-Host "Failed to connect to Exchange Online: $_" -ForegroundColor Red
+    Write-Log "Failed to connect to Exchange Online: $_" -Level ERROR
     exit 1
 }
 
-Write-Host "===== Remove Malicious Email Tool =====" -ForegroundColor Cyan
-Write-Host "This tool searches and removes emails from all mailboxes."
-Write-Host "========================================`n" -ForegroundColor Cyan
+# Handle command-line parameters (non-interactive mode)
+if ($Subject -and $Sender) {
+    Write-Log "Running in parameter mode" -Level INFO
 
-Write-Warning "Ensure you have the subject and sender of the email.`nThis information can be obtained from the email headers."
+    $Script:Subject = $Subject
+    $Script:SenderAddress = $Sender
+    $Script:Recipient = $Recipient
+    $Script:AttachmentName = $AttachmentName
+    $Script:ExcludeMailboxes = $ExcludeMailboxes
+    $Script:SearchType = if ($Subject -match '\*' -or $Sender -match '\*') { "Wildcard" } else { "Exact" }
 
-# Get search type (exact or wildcard)
-Get-SearchType
+    # Handle date parameters
+    if ($Last24Hours) {
+        $Script:StartDate = (Get-Date).AddDays(-1)
+        $Script:EndDate = Get-Date
+    } elseif ($Last7Days) {
+        $Script:StartDate = (Get-Date).AddDays(-7)
+        $Script:EndDate = Get-Date
+    } else {
+        $Script:StartDate = $StartDate
+        $Script:EndDate = $EndDate
+    }
 
-# Get email details
-Get-EmailSubject
+    Start-NewSearch
+} else {
+    # Interactive mode
+    Write-Warning "Ensure you have the subject and sender of the email.`nThis information can be obtained from the email headers."
 
-# Start the search
-Start-NewSearch
+    Get-SearchType
+    Get-DateFilter
+    Get-EmailSubject
+    Start-NewSearch
+}
 
 # Cleanup
-Write-Host "`nDisconnecting from Exchange Online..." -ForegroundColor Yellow
+Write-Host ""
+Write-Log "Disconnecting from Exchange Online..." -Level INFO
 Disconnect-ExchangeOnline -Confirm:$false -InformationAction Ignore -ErrorAction SilentlyContinue
-Write-Host "Done." -ForegroundColor Green
+Write-Log "Session complete." -Level SUCCESS
