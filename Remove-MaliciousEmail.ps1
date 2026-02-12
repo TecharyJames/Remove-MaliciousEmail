@@ -329,10 +329,11 @@ function Get-DeleteType {
     Write-Host "`n===== Deletion Type =====" -ForegroundColor Cyan
     Write-Host "1. Soft Delete (Recommended) - Moves to Recoverable Items, can be restored"
     Write-Host "2. Hard Delete               - Permanently deletes, cannot be recovered"
+    Write-Host "3. Cancel                    - Do not delete"
     Write-Host "==========================" -ForegroundColor Cyan
 
     do {
-        $choice = Read-Host "`nSelect deletion type (1 or 2)"
+        $choice = Read-Host "`nSelect deletion type (1, 2, or 3)"
         switch ($choice) {
             "1" { return "SoftDelete" }
             "2" {
@@ -340,7 +341,8 @@ function Get-DeleteType {
                 if ($confirm -eq "YES") { return "HardDelete" }
                 else { Write-Host "Hard delete cancelled. Using soft delete." -ForegroundColor Yellow; return "SoftDelete" }
             }
-            default { Write-Host "Please enter 1 or 2" -ForegroundColor Yellow }
+            "3" { return "Cancel" }
+            default { Write-Host "Please enter 1, 2, or 3" -ForegroundColor Yellow }
         }
     } until ($false)
 }
@@ -577,67 +579,55 @@ function Get-ContentSearchStatus {
 function Remove-ContentSearchResults {
     Write-Host ""
 
-    if ($NonInteractive) {
-        $deleteConfirm = "Y"
+    # Get deletion type
+    if ($HardDelete) {
+        $purgeType = "HardDelete"
+    } elseif ($NonInteractive) {
+        $purgeType = "SoftDelete"
     } else {
-        $deleteConfirm = Read-Host "Do you want to delete all $Script:Items found email(s)? (Y/N)"
+        $purgeType = Get-DeleteType
     }
 
-    switch ($deleteConfirm.ToUpper()) {
-        "Y" {
-            # Get deletion type
-            if ($HardDelete) {
-                $purgeType = "HardDelete"
-            } elseif ($NonInteractive) {
-                $purgeType = "SoftDelete"
-            } else {
-                $purgeType = Get-DeleteType
-            }
+    if ($purgeType -eq "Cancel") {
+        Write-Log "Deletion cancelled by user." -Level INFO
+        return
+    }
 
-            Write-Log "Initiating $purgeType for $Script:Items email(s)..." -Level INFO
+    Write-Log "Initiating $purgeType for $Script:Items email(s)..." -Level INFO
 
-            try {
-                New-ComplianceSearchAction -SearchName $Script:RandomIdentity -Purge -PurgeType $purgeType -Confirm:$false | Out-Null
+    try {
+        New-ComplianceSearchAction -SearchName $Script:RandomIdentity -Purge -PurgeType $purgeType -Confirm:$false | Out-Null
 
-                $maxAttempts = 120
-                $attempts = 0
+        $maxAttempts = 120
+        $attempts = 0
 
-                while ((Get-ComplianceSearchAction -Identity "$Script:RandomIdentity`_Purge").Status -ne "Completed") {
-                    Show-Progress -Activity "Deleting emails ($purgeType)" -SecondsToWait 5
-                    $attempts++
-                    if ($attempts -ge $maxAttempts) {
-                        Write-Log "Purge timed out. Check compliance center manually." -Level ERROR
-                        return
-                    }
-                }
-
-                Write-Host ""
-                Write-Host "`n===== Deletion Complete =====" -ForegroundColor Green
-                Write-Host "Emails Deleted: $Script:Items"
-                Write-Host "Delete Type:    $purgeType"
-                Write-Host "Search ID:      $Script:RandomIdentity"
-                Write-Host "Search Type:    $Script:SearchType"
-                Write-Host "Subject:        $Script:Subject"
-                Write-Host "Sender:         $Script:SenderAddress"
-                if ($Script:StartDate) { Write-Host "Date Range:     $($Script:StartDate.ToString('yyyy-MM-dd')) to $($Script:EndDate.ToString('yyyy-MM-dd'))" }
-                Write-Host "Log File:       $Script:LogFile"
-                Write-Host "==============================" -ForegroundColor Green
-
-                Write-Log "Deletion completed. $Script:Items emails removed using $purgeType." -Level SUCCESS
-                Write-Host "`nScreenshot this message for your records." -ForegroundColor Cyan
-
-                if (-not $NonInteractive) { Pause }
-            } catch {
-                Write-Log "Error during deletion: $_" -Level ERROR
+        while ((Get-ComplianceSearchAction -Identity "$Script:RandomIdentity`_Purge").Status -ne "Completed") {
+            Show-Progress -Activity "Deleting emails ($purgeType)" -SecondsToWait 5
+            $attempts++
+            if ($attempts -ge $maxAttempts) {
+                Write-Log "Purge timed out. Check compliance center manually." -Level ERROR
+                return
             }
         }
-        "N" {
-            Write-Log "Deletion cancelled by user." -Level INFO
-        }
-        default {
-            Write-Host "Please enter Y or N" -ForegroundColor Yellow
-            Remove-ContentSearchResults
-        }
+
+        Write-Host ""
+        Write-Host "`n===== Deletion Complete =====" -ForegroundColor Green
+        Write-Host "Emails Deleted: $Script:Items"
+        Write-Host "Delete Type:    $purgeType"
+        Write-Host "Search ID:      $Script:RandomIdentity"
+        Write-Host "Search Type:    $Script:SearchType"
+        Write-Host "Subject:        $Script:Subject"
+        Write-Host "Sender:         $Script:SenderAddress"
+        if ($Script:StartDate) { Write-Host "Date Range:     $($Script:StartDate.ToString('yyyy-MM-dd')) to $($Script:EndDate.ToString('yyyy-MM-dd'))" }
+        Write-Host "Log File:       $Script:LogFile"
+        Write-Host "==============================" -ForegroundColor Green
+
+        Write-Log "Deletion completed. $Script:Items emails removed using $purgeType." -Level SUCCESS
+        Write-Host "`nScreenshot this message for your records." -ForegroundColor Cyan
+
+        if (-not $NonInteractive) { Pause }
+    } catch {
+        Write-Log "Error during deletion: $_" -Level ERROR
     }
 }
 
