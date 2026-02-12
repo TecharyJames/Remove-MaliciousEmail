@@ -144,12 +144,17 @@ function Write-Log {
 }
 
 # ===== Module Check =====
-$module = Get-Module -Name ExchangeOnlineManagement -ListAvailable
+$requiredVersion = [Version]"3.9.0"
+$module = Get-Module -Name ExchangeOnlineManagement -ListAvailable | Sort-Object Version -Descending | Select-Object -First 1
+
 if ($null -eq $module) {
-    Write-Log "Installing ExchangeOnlineManagement module..." -Level WARN
+    Write-Host "Installing ExchangeOnlineManagement module..." -ForegroundColor Yellow
     Install-Module -Name ExchangeOnlineManagement -Scope CurrentUser -Force
+} elseif ($module.Version -lt $requiredVersion) {
+    Write-Host "Updating ExchangeOnlineManagement module to v3.9.0+..." -ForegroundColor Yellow
+    Update-Module -Name ExchangeOnlineManagement -Force
 }
-Import-Module ExchangeOnlineManagement -ErrorAction Stop
+Import-Module ExchangeOnlineManagement -MinimumVersion $requiredVersion -ErrorAction Stop
 
 # ===== ASCII Logo =====
 function Print-TecharyLogo {
@@ -699,13 +704,14 @@ Write-Host "===========================`n" -ForegroundColor Cyan
 
 Write-Log "Script started. Log file: $Script:LogFile" -Level INFO
 
-# Connect to Exchange Online
+# Connect to Exchange Online Security & Compliance Center
 Write-Log "Connecting to Exchange Online Security & Compliance Center..." -Level INFO
 try {
-    Connect-IPPSSession -ErrorAction Stop
+    Connect-IPPSSession -EnableSearchOnlySession -ErrorAction Stop
     Write-Log "Connected successfully." -Level SUCCESS
 } catch {
     Write-Log "Failed to connect to Exchange Online: $_" -Level ERROR
+    Write-Log "Ensure you have ExchangeOnlineManagement v3.9.0+ installed" -Level ERROR
     exit 1
 }
 
