@@ -704,6 +704,18 @@ Write-Host "===========================`n" -ForegroundColor Cyan
 
 Write-Log "Script started. Log file: $Script:LogFile" -Level INFO
 
+# Disconnect any existing sessions to avoid assembly conflicts
+try {
+    $existingSessions = Get-PSSession | Where-Object { $_.ConfigurationName -like "*Exchange*" -or $_.Name -like "*ExchangeOnline*" }
+    if ($existingSessions) {
+        Write-Log "Closing existing Exchange sessions..." -Level WARN
+        $existingSessions | Remove-PSSession -ErrorAction SilentlyContinue
+    }
+    Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue 2>$null
+} catch {
+    # Ignore disconnection errors
+}
+
 # Connect to Exchange Online Security & Compliance Center
 Write-Log "Connecting to Exchange Online Security & Compliance Center..." -Level INFO
 try {
@@ -712,6 +724,7 @@ try {
 } catch {
     Write-Log "Failed to connect to Exchange Online: $_" -Level ERROR
     Write-Log "Ensure you have ExchangeOnlineManagement v3.9.0+ installed" -Level ERROR
+    Write-Log "If issue persists, close PowerShell completely and reopen." -Level ERROR
     exit 1
 }
 
