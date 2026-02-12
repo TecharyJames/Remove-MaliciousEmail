@@ -409,31 +409,16 @@ function Export-SearchResults {
     try {
         Write-Log "Exporting search results to CSV..." -Level INFO
 
-        # Create export action
-        $exportActionName = "${SearchName}_Export"
-        New-ComplianceSearchAction -SearchName $SearchName -Preview | Out-Null
+        # Get search results directly from the compliance search
+        $search = Get-ComplianceSearch -Identity $SearchName
+        $successResults = $search.SuccessResults
 
-        # Wait for preview to complete
-        $maxAttempts = 60
-        $attempts = 0
-        while ((Get-ComplianceSearchAction -Identity "${SearchName}_Preview" -ErrorAction SilentlyContinue).Status -ne "Completed") {
-            Show-Progress -Activity "Generating preview" -SecondsToWait 2
-            $attempts++
-            if ($attempts -ge $maxAttempts) {
-                Write-Log "Preview generation timed out" -Level WARN
-                return $null
-            }
-        }
-
-        # Get preview results
-        $previewResults = (Get-ComplianceSearchAction -Identity "${SearchName}_Preview").Results
-
-        if ($previewResults) {
+        if ($successResults) {
             $csvPath = Join-Path $ExportPath "EmailSearch_${SearchName}_$(Get-Date -Format 'yyyyMMdd_HHmmss').csv"
 
             # Parse and export results
             $parsedResults = @()
-            $resultLines = $previewResults -split ';'
+            $resultLines = $successResults -split ';'
 
             foreach ($line in $resultLines) {
                 if ($line -match "Location:\s*(.+?),\s*Item count:\s*(\d+),\s*Total size:\s*(\d+)") {
@@ -468,35 +453,19 @@ function Export-SearchResults {
 function Show-SearchPreview {
     param([string]$SearchName)
 
-    Write-Host "`n===== Search Preview =====" -ForegroundColor Cyan
+    Write-Host "`n===== Affected Mailboxes =====" -ForegroundColor Cyan
 
     try {
-        # Check if preview action already exists
-        $previewAction = Get-ComplianceSearchAction -Identity "${SearchName}_Preview" -ErrorAction SilentlyContinue
+        # Get search results directly from the compliance search
+        $search = Get-ComplianceSearch -Identity $SearchName
+        $successResults = $search.SuccessResults
 
-        if (-not $previewAction) {
-            New-ComplianceSearchAction -SearchName $SearchName -Preview | Out-Null
-
-            $maxAttempts = 60
-            $attempts = 0
-            while ((Get-ComplianceSearchAction -Identity "${SearchName}_Preview").Status -ne "Completed") {
-                Show-Progress -Activity "Generating preview" -SecondsToWait 2
-                $attempts++
-                if ($attempts -ge $maxAttempts) {
-                    Write-Log "Preview generation timed out" -Level WARN
-                    return
-                }
-            }
-        }
-
-        $previewResults = (Get-ComplianceSearchAction -Identity "${SearchName}_Preview").Results
-
-        if ($previewResults) {
+        if ($successResults) {
             Write-Host ""
             Write-Host "Mailboxes with matching emails:" -ForegroundColor Yellow
             Write-Host "-" * 60
 
-            $resultLines = $previewResults -split ';'
+            $resultLines = $successResults -split ';'
             $displayCount = 0
 
             foreach ($line in $resultLines) {
@@ -513,10 +482,10 @@ function Show-SearchPreview {
             }
             Write-Host "-" * 60
         } else {
-            Write-Host "No preview details available" -ForegroundColor Gray
+            Write-Host "No mailbox details available" -ForegroundColor Gray
         }
     } catch {
-        Write-Log "Error generating preview: $_" -Level ERROR
+        Write-Log "Error showing preview: $_" -Level ERROR
     }
 }
 
