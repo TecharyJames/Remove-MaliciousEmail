@@ -81,10 +81,10 @@ param(
     [string]$AttachmentName,
 
     [Parameter(Mandatory = $false)]
-    [datetime]$StartDate,
+    [Nullable[datetime]]$StartDate,
 
     [Parameter(Mandatory = $false)]
-    [datetime]$EndDate,
+    [Nullable[datetime]]$EndDate,
 
     [Parameter(Mandatory = $false)]
     [switch]$Last24Hours,
