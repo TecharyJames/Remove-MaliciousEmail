@@ -262,13 +262,8 @@ function Get-EmailSubject {
         Write-Host "  Multiple: invoice,payment,urgent (comma-separated)" -ForegroundColor Gray
         Write-Host "  Commas in subjects: wrap in quotes, e.g. `"Hello, World`",other" -ForegroundColor Gray
     }
-    $Script:Subject = Read-Host "`nEnter the subject of the email (comma-separate for multiple, use quotes if subject contains commas)"
+    $Script:Subject = Read-Host "`nEnter the subject of the email (comma-separate for multiple, use quotes if subject contains commas, or press Enter to skip)"
 
-    if ([string]::IsNullOrWhiteSpace($Script:Subject)) {
-        Write-Host "Subject cannot be empty. Please try again." -ForegroundColor Red
-        Get-EmailSubject
-        return
-    }
     Get-EmailSender
 }
 
@@ -279,13 +274,15 @@ function Get-EmailSender {
         Write-Host "  Examples: @malicious.com  |  attacker  |  phish" -ForegroundColor Gray
         Write-Host "  Multiple: bad@evil.com,@phish.com (comma-separated)" -ForegroundColor Gray
     }
-    $Script:SenderAddress = Read-Host "`nEnter the sender email address (comma-separate for multiple)"
+    $Script:SenderAddress = Read-Host "`nEnter the sender email address (comma-separate for multiple, or press Enter to skip)"
 
-    if ([string]::IsNullOrWhiteSpace($Script:SenderAddress)) {
-        Write-Host "Sender address cannot be empty. Please try again." -ForegroundColor Red
-        Get-EmailSender
+    # Validate at least one of subject or sender is provided
+    if ([string]::IsNullOrWhiteSpace($Script:Subject) -and [string]::IsNullOrWhiteSpace($Script:SenderAddress)) {
+        Write-Host "Both subject and sender cannot be empty. Please provide at least one." -ForegroundColor Red
+        Get-EmailSubject
         return
     }
+
     Get-OptionalFilters
 }
 
@@ -307,9 +304,12 @@ function Get-InfoConfirmation {
     } else { "All time" }
 
     Write-Host "`n===== Search Summary =====" -ForegroundColor Cyan
+    $subjectDisplay = if ([string]::IsNullOrWhiteSpace($Script:Subject)) { "(any)" } else { $Script:Subject }
+    $senderDisplay = if ([string]::IsNullOrWhiteSpace($Script:SenderAddress)) { "(any)" } else { $Script:SenderAddress }
+
     Write-Host "Search Type:    $Script:SearchType"
-    Write-Host "Subject:        $Script:Subject"
-    Write-Host "Sender:         $Script:SenderAddress"
+    Write-Host "Subject:        $subjectDisplay"
+    Write-Host "Sender:         $senderDisplay"
     Write-Host "Date Range:     $dateRange"
     if ($Script:Recipient) { Write-Host "Recipient:      $Script:Recipient" }
     if ($Script:AttachmentName) { Write-Host "Attachment:     $Script:AttachmentName" }
@@ -390,41 +390,41 @@ function Build-ContentMatchQuery {
     $queryParts = @()
 
     # Build subject query (support multiple with OR, respects quotes)
-    $subjects = Split-QuotedString -InputString $Script:Subject -Delimiter ','
-    $subjectQueries = @()
-    foreach ($subj in $subjects) {
-        if ($Script:SearchType -eq "Exact") {
-            $subjectQueries += "Subject:`"$subj`""
-        } else {
-            # KQL only supports trailing wildcards (term*), not leading (*term)
-            # Strip * and use quotes for phrase matching — KQL does substring matching by default
-            $cleanSubj = $subj -replace '\*', ''
-            $subjectQueries += "Subject:`"$cleanSubj`""
+    if (-not [string]::IsNullOrWhiteSpace($Script:Subject)) {
+        $subjects = Split-QuotedString -InputString $Script:Subject -Delimiter ','
+        $subjectQueries = @()
+        foreach ($subj in $subjects) {
+            if ($Script:SearchType -eq "Exact") {
+                $subjectQueries += "Subject:`"$subj`""
+            } else {
+                $cleanSubj = $subj -replace '\*', ''
+                $subjectQueries += "Subject:`"$cleanSubj`""
+            }
         }
-    }
-    if ($subjectQueries.Count -gt 1) {
-        $queryParts += "(" + ($subjectQueries -join " OR ") + ")"
-    } else {
-        $queryParts += $subjectQueries[0]
+        if ($subjectQueries.Count -gt 1) {
+            $queryParts += "(" + ($subjectQueries -join " OR ") + ")"
+        } else {
+            $queryParts += $subjectQueries[0]
+        }
     }
 
     # Build sender query (support multiple with OR, respects quotes)
-    $senders = Split-QuotedString -InputString $Script:SenderAddress -Delimiter ','
-    $senderQueries = @()
-    foreach ($sndr in $senders) {
-        if ($Script:SearchType -eq "Exact") {
-            $senderQueries += "From:`"$sndr`""
-        } else {
-            # KQL only supports trailing wildcards (term*), not leading (*term)
-            # Strip * and use quotes for phrase matching — KQL does substring matching by default
-            $cleanSndr = $sndr -replace '\*', ''
-            $senderQueries += "From:`"$cleanSndr`""
+    if (-not [string]::IsNullOrWhiteSpace($Script:SenderAddress)) {
+        $senders = Split-QuotedString -InputString $Script:SenderAddress -Delimiter ','
+        $senderQueries = @()
+        foreach ($sndr in $senders) {
+            if ($Script:SearchType -eq "Exact") {
+                $senderQueries += "From:`"$sndr`""
+            } else {
+                $cleanSndr = $sndr -replace '\*', ''
+                $senderQueries += "From:`"$cleanSndr`""
+            }
         }
-    }
-    if ($senderQueries.Count -gt 1) {
-        $queryParts += "(" + ($senderQueries -join " OR ") + ")"
-    } else {
-        $queryParts += $senderQueries[0]
+        if ($senderQueries.Count -gt 1) {
+            $queryParts += "(" + ($senderQueries -join " OR ") + ")"
+        } else {
+            $queryParts += $senderQueries[0]
+        }
     }
 
     # Add recipient filter
@@ -465,18 +465,21 @@ function Export-SearchResults {
 
             # Parse and export results
             $parsedResults = @()
-            $pattern = "Location:\s*(.+?),\s*Item count:\s*(\d+),\s*Total size:\s*(\d+)"
+            $pattern = "Location:\s*(.+?)[,;]\s*Item count:\s*(\d+)[,;]\s*Total size:\s*(\d+)"
             $allMatches = [regex]::Matches($successResults, $pattern)
 
             foreach ($m in $allMatches) {
-                $parsedResults += [PSCustomObject]@{
-                    Mailbox    = $m.Groups[1].Value.Trim()
-                    ItemCount  = [int]$m.Groups[2].Value
-                    TotalSize  = [int]$m.Groups[3].Value
-                    SearchName = $SearchName
-                    SearchDate = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-                    Subject    = $Script:Subject
-                    Sender     = $Script:SenderAddress
+                $itemCount = [int]$m.Groups[2].Value
+                if ($itemCount -gt 0) {
+                    $parsedResults += [PSCustomObject]@{
+                        Mailbox    = $m.Groups[1].Value.Trim()
+                        ItemCount  = $itemCount
+                        TotalSize  = [int]$m.Groups[3].Value
+                        SearchName = $SearchName
+                        SearchDate = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+                        Subject    = $Script:Subject
+                        Sender     = $Script:SenderAddress
+                    }
                 }
             }
 
@@ -512,21 +515,25 @@ function Show-SearchPreview {
             Write-Host "Mailboxes with matching emails:" -ForegroundColor Yellow
             Write-Host ("-" * 60)
 
-            $pattern = "Location:\s*(.+?),\s*Item count:\s*(\d+),\s*Total size:\s*(\d+)"
+            $pattern = "Location:\s*(.+?)[,;]\s*Item count:\s*(\d+)[,;]\s*Total size:\s*(\d+)"
             $allMatches = [regex]::Matches($successResults, $pattern)
             $displayCount = 0
+            $totalWithItems = 0
 
             foreach ($m in $allMatches) {
-                if ($displayCount -lt 20) {
-                    $mailbox = $m.Groups[1].Value.Trim()
-                    $count = $m.Groups[2].Value
-                    Write-Host "  $mailbox - $count item(s)" -ForegroundColor White
+                $count = [int]$m.Groups[2].Value
+                if ($count -gt 0) {
+                    $totalWithItems++
+                    if ($displayCount -lt 20) {
+                        $mailbox = $m.Groups[1].Value.Trim()
+                        Write-Host "  $mailbox - $count item(s)" -ForegroundColor White
+                        $displayCount++
+                    }
                 }
-                $displayCount++
             }
 
-            if ($allMatches.Count -gt 20) {
-                Write-Host "  ... and $($allMatches.Count - 20) more (see exported CSV for full list)" -ForegroundColor Gray
+            if ($totalWithItems -gt 20) {
+                Write-Host "  ... and $($totalWithItems - 20) more (see exported CSV for full list)" -ForegroundColor Gray
             }
             Write-Host ("-" * 60)
         } else {
@@ -743,7 +750,7 @@ try {
 }
 
 # Handle command-line parameters (non-interactive mode)
-if ($Subject -and $Sender) {
+if ($Subject -or $Sender) {
     Write-Log "Running in parameter mode" -Level INFO
 
     $Script:Subject = $Subject
