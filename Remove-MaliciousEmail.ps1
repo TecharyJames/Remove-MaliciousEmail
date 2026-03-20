@@ -12,10 +12,10 @@
     date filtering, CSV export, and detailed logging.
 
 .PARAMETER Subject
-    The email subject to search for. Use * for wildcards. Separate multiple with commas.
+    The email subject to search for. Separate multiple with commas. Wrap in quotes if subject contains commas.
 
 .PARAMETER Sender
-    The sender email address to search for. Use * for wildcards. Separate multiple with commas.
+    The sender email address to search for. Separate multiple with commas.
 
 .PARAMETER Recipient
     Filter by recipient email address. Optional.
@@ -58,7 +58,7 @@
     Runs in interactive mode with menus.
 
 .EXAMPLE
-    .\Remove-MaliciousEmail.ps1 -Subject "*invoice*" -Sender "*@malicious.com" -Last24Hours -PreviewOnly
+    .\Remove-MaliciousEmail.ps1 -Subject "invoice" -Sender "@malicious.com" -Last24Hours -PreviewOnly
     Preview emails matching criteria from last 24 hours.
 
 .EXAMPLE
@@ -193,7 +193,7 @@ function Show-Progress {
 function Get-SearchType {
     Write-Host "`n===== Search Type Selection =====" -ForegroundColor Cyan
     Write-Host "1. Exact Match   - Search for exact subject/sender"
-    Write-Host "2. Wildcard      - Use * for partial matches (e.g., *invoice*, *@domain.com)"
+    Write-Host "2. Partial Match - Search for keywords/phrases (e.g., invoice, @domain.com)"
     Write-Host "=================================" -ForegroundColor Cyan
 
     do {
@@ -257,11 +257,12 @@ function Get-DateFilter {
 function Get-EmailSubject {
     Write-Host ""
     if ($Script:SearchType -eq "Wildcard") {
-        Write-Host "Wildcard Tips: Use * for partial matches" -ForegroundColor Yellow
-        Write-Host "  Examples: *invoice*  |  *urgent payment*  |  Your account*" -ForegroundColor Gray
+        Write-Host "Partial Match Tips: Enter keywords or phrases to match" -ForegroundColor Yellow
+        Write-Host "  Examples: invoice  |  urgent payment  |  Your account" -ForegroundColor Gray
         Write-Host "  Multiple: invoice,payment,urgent (comma-separated)" -ForegroundColor Gray
+        Write-Host "  Commas in subjects: wrap in quotes, e.g. `"Hello, World`",other" -ForegroundColor Gray
     }
-    $Script:Subject = Read-Host "`nEnter the subject of the email (comma-separate for multiple)"
+    $Script:Subject = Read-Host "`nEnter the subject of the email (comma-separate for multiple, use quotes if subject contains commas)"
 
     if ([string]::IsNullOrWhiteSpace($Script:Subject)) {
         Write-Host "Subject cannot be empty. Please try again." -ForegroundColor Red
@@ -274,9 +275,9 @@ function Get-EmailSubject {
 function Get-EmailSender {
     Write-Host ""
     if ($Script:SearchType -eq "Wildcard") {
-        Write-Host "Wildcard Tips: Use * for partial matches" -ForegroundColor Yellow
-        Write-Host "  Examples: *@malicious.com  |  attacker*  |  *phish*" -ForegroundColor Gray
-        Write-Host "  Multiple: bad@evil.com,*@phish.com (comma-separated)" -ForegroundColor Gray
+        Write-Host "Partial Match Tips: Enter keywords or partial addresses to match" -ForegroundColor Yellow
+        Write-Host "  Examples: @malicious.com  |  attacker  |  phish" -ForegroundColor Gray
+        Write-Host "  Multiple: bad@evil.com,@phish.com (comma-separated)" -ForegroundColor Gray
     }
     $Script:SenderAddress = Read-Host "`nEnter the sender email address (comma-separate for multiple)"
 
@@ -341,24 +342,64 @@ function Get-DeleteType {
                 if ($confirm -eq "YES") { return "HardDelete" }
                 else { Write-Host "Hard delete cancelled. Using soft delete." -ForegroundColor Yellow; return "SoftDelete" }
             }
-            "3" { return "Cancel" }
+            "3" {
+                $confirm = Read-Host "Are you sure you want to cancel? The search results will be discarded (Y/N)"
+                if ($confirm.ToUpper() -eq "Y") { return "Cancel" }
+                else { Write-Host "Returning to deletion options..." -ForegroundColor Yellow }
+            }
             default { Write-Host "Please enter 1, 2, or 3" -ForegroundColor Yellow }
         }
     } until ($false)
+}
+
+# ===== Quote-Aware Split =====
+function Split-QuotedString {
+    param([string]$InputString, [char]$Delimiter = ',')
+
+    $results = @()
+    $current = ''
+    $inDoubleQuote = $false
+    $inSingleQuote = $false
+
+    for ($i = 0; $i -lt $InputString.Length; $i++) {
+        $char = $InputString[$i]
+
+        if ($char -eq '"' -and -not $inSingleQuote) {
+            $inDoubleQuote = -not $inDoubleQuote
+            # Don't include the quote character in the output
+        } elseif ($char -eq "'" -and -not $inDoubleQuote) {
+            $inSingleQuote = -not $inSingleQuote
+            # Don't include the quote character in the output
+        } elseif ($char -eq $Delimiter -and -not $inDoubleQuote -and -not $inSingleQuote) {
+            $results += $current.Trim()
+            $current = ''
+        } else {
+            $current += $char
+        }
+    }
+
+    if ($current.Trim()) {
+        $results += $current.Trim()
+    }
+
+    return $results | Where-Object { $_ }
 }
 
 # ===== Query Building =====
 function Build-ContentMatchQuery {
     $queryParts = @()
 
-    # Build subject query (support multiple with OR)
-    $subjects = $Script:Subject -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ }
+    # Build subject query (support multiple with OR, respects quotes)
+    $subjects = Split-QuotedString -InputString $Script:Subject -Delimiter ','
     $subjectQueries = @()
     foreach ($subj in $subjects) {
         if ($Script:SearchType -eq "Exact") {
             $subjectQueries += "Subject:`"$subj`""
         } else {
-            $subjectQueries += "Subject:$subj"
+            # KQL only supports trailing wildcards (term*), not leading (*term)
+            # Strip * and use quotes for phrase matching — KQL does substring matching by default
+            $cleanSubj = $subj -replace '\*', ''
+            $subjectQueries += "Subject:`"$cleanSubj`""
         }
     }
     if ($subjectQueries.Count -gt 1) {
@@ -367,14 +408,17 @@ function Build-ContentMatchQuery {
         $queryParts += $subjectQueries[0]
     }
 
-    # Build sender query (support multiple with OR)
-    $senders = $Script:SenderAddress -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ }
+    # Build sender query (support multiple with OR, respects quotes)
+    $senders = Split-QuotedString -InputString $Script:SenderAddress -Delimiter ','
     $senderQueries = @()
     foreach ($sndr in $senders) {
         if ($Script:SearchType -eq "Exact") {
             $senderQueries += "From:`"$sndr`""
         } else {
-            $senderQueries += "From:$sndr"
+            # KQL only supports trailing wildcards (term*), not leading (*term)
+            # Strip * and use quotes for phrase matching — KQL does substring matching by default
+            $cleanSndr = $sndr -replace '\*', ''
+            $senderQueries += "From:`"$cleanSndr`""
         }
     }
     if ($senderQueries.Count -gt 1) {
@@ -406,33 +450,33 @@ function Build-ContentMatchQuery {
 
 # ===== Export Function =====
 function Export-SearchResults {
-    param([string]$SearchName)
+    param(
+        [string]$SearchName,
+        [string]$SuccessResults
+    )
 
     try {
         Write-Log "Exporting search results to CSV..." -Level INFO
 
-        # Get search results directly from the compliance search
-        $search = Get-ComplianceSearch -Identity $SearchName
-        $successResults = $search.SuccessResults
+        $successResults = $SuccessResults
 
         if ($successResults) {
             $csvPath = Join-Path $ExportPath "EmailSearch_${SearchName}_$(Get-Date -Format 'yyyyMMdd_HHmmss').csv"
 
             # Parse and export results
             $parsedResults = @()
-            $resultLines = $successResults -split ';'
+            $pattern = "Location:\s*(.+?),\s*Item count:\s*(\d+),\s*Total size:\s*(\d+)"
+            $allMatches = [regex]::Matches($successResults, $pattern)
 
-            foreach ($line in $resultLines) {
-                if ($line -match "Location:\s*(.+?),\s*Item count:\s*(\d+),\s*Total size:\s*(\d+)") {
-                    $parsedResults += [PSCustomObject]@{
-                        Mailbox    = $matches[1].Trim()
-                        ItemCount  = [int]$matches[2]
-                        TotalSize  = [int]$matches[3]
-                        SearchName = $SearchName
-                        SearchDate = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-                        Subject    = $Script:Subject
-                        Sender     = $Script:SenderAddress
-                    }
+            foreach ($m in $allMatches) {
+                $parsedResults += [PSCustomObject]@{
+                    Mailbox    = $m.Groups[1].Value.Trim()
+                    ItemCount  = [int]$m.Groups[2].Value
+                    TotalSize  = [int]$m.Groups[3].Value
+                    SearchName = $SearchName
+                    SearchDate = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+                    Subject    = $Script:Subject
+                    Sender     = $Script:SenderAddress
                 }
             }
 
@@ -453,36 +497,38 @@ function Export-SearchResults {
 
 # ===== Preview Function =====
 function Show-SearchPreview {
-    param([string]$SearchName)
+    param(
+        [string]$SearchName,
+        [string]$SuccessResults
+    )
 
     Write-Host "`n===== Affected Mailboxes =====" -ForegroundColor Cyan
 
     try {
-        # Get search results directly from the compliance search
-        $search = Get-ComplianceSearch -Identity $SearchName
-        $successResults = $search.SuccessResults
+        $successResults = $SuccessResults
 
         if ($successResults) {
             Write-Host ""
             Write-Host "Mailboxes with matching emails:" -ForegroundColor Yellow
-            Write-Host "-" * 60
+            Write-Host ("-" * 60)
 
-            $resultLines = $successResults -split ';'
+            $pattern = "Location:\s*(.+?),\s*Item count:\s*(\d+),\s*Total size:\s*(\d+)"
+            $allMatches = [regex]::Matches($successResults, $pattern)
             $displayCount = 0
 
-            foreach ($line in $resultLines) {
-                if ($line -match "Location:\s*(.+?),\s*Item count:\s*(\d+),\s*Total size:\s*(\d+)" -and $displayCount -lt 20) {
-                    $mailbox = $matches[1].Trim()
-                    $count = $matches[2]
+            foreach ($m in $allMatches) {
+                if ($displayCount -lt 20) {
+                    $mailbox = $m.Groups[1].Value.Trim()
+                    $count = $m.Groups[2].Value
                     Write-Host "  $mailbox - $count item(s)" -ForegroundColor White
-                    $displayCount++
                 }
+                $displayCount++
             }
 
-            if ($resultLines.Count -gt 20) {
-                Write-Host "  ... and more (see exported CSV for full list)" -ForegroundColor Gray
+            if ($allMatches.Count -gt 20) {
+                Write-Host "  ... and $($allMatches.Count - 20) more (see exported CSV for full list)" -ForegroundColor Gray
             }
-            Write-Host "-" * 60
+            Write-Host ("-" * 60)
         } else {
             Write-Host "No mailbox details available" -ForegroundColor Gray
         }
@@ -498,12 +544,12 @@ function Get-ContentSearchStatus {
     try {
         $maxAttempts = 120
         $attempts = 0
+        $search = Get-ComplianceSearch -Identity $Script:RandomIdentity
 
-        while ((Get-ComplianceSearch -Identity $Script:RandomIdentity).Status -ne "Completed") {
+        while ($search.Status -ne "Completed") {
             Show-Progress -Activity "Searching mailboxes" -SecondsToWait 5
             $attempts++
 
-            # Show progress percentage if available
             $search = Get-ComplianceSearch -Identity $Script:RandomIdentity
             if ($search.JobProgress -gt 0) {
                 Write-Host "`rSearch progress: $($search.JobProgress)%   " -NoNewline -ForegroundColor Cyan
@@ -516,9 +562,9 @@ function Get-ContentSearchStatus {
         }
 
         Write-Host ""
-        $Script:Items = (Get-ComplianceSearch -Identity $Script:RandomIdentity).Items
-        $searchQuery = (Get-ComplianceSearch -Identity $Script:RandomIdentity).ContentMatchQuery
-        $searchSize = (Get-ComplianceSearch -Identity $Script:RandomIdentity).Size
+        $Script:Items = $search.Items
+        $searchQuery = $search.ContentMatchQuery
+        $searchSize = $search.Size
 
         # Format size
         $sizeFormatted = if ($searchSize -gt 1GB) { "{0:N2} GB" -f ($searchSize / 1GB) }
@@ -539,14 +585,17 @@ function Get-ContentSearchStatus {
         Write-Log "Search completed. Found $Script:Items items ($sizeFormatted)" -Level SUCCESS
 
         if ($Script:Items -ne 0) {
+            $successResults = $search.SuccessResults
+
             # Show preview
-            Show-SearchPreview -SearchName $Script:RandomIdentity
+            Show-SearchPreview -SearchName $Script:RandomIdentity -SuccessResults $successResults
 
             # Export results
-            $exportedFile = Export-SearchResults -SearchName $Script:RandomIdentity
+            Export-SearchResults -SearchName $Script:RandomIdentity -SuccessResults $successResults
 
             if ($PreviewOnly) {
                 Write-Log "Preview only mode - no deletion performed" -Level INFO
+                Remove-ComplianceSearch -Identity $Script:RandomIdentity -Confirm:$false -ErrorAction SilentlyContinue
                 return
             }
 
@@ -557,7 +606,7 @@ function Get-ContentSearchStatus {
             Write-Log "No emails found with the specified criteria." -Level WARN
             Write-Host "`nTips:" -ForegroundColor Cyan
             Write-Host "  - Check spelling of subject and sender"
-            Write-Host "  - Try using wildcard search with * for partial matches"
+            Write-Host "  - Try using partial match search for broader results"
             Write-Host "  - Adjust the date range"
             Write-Host "  - Verify the email hasn't already been deleted"
 
@@ -590,6 +639,8 @@ function Remove-ContentSearchResults {
 
     if ($purgeType -eq "Cancel") {
         Write-Log "Deletion cancelled by user." -Level INFO
+        Remove-ComplianceSearch -Identity $Script:RandomIdentity -Confirm:$false -ErrorAction SilentlyContinue
+        Write-Log "Cleaned up search '$Script:RandomIdentity'." -Level INFO
         return
     }
 
@@ -624,6 +675,10 @@ function Remove-ContentSearchResults {
 
         Write-Log "Deletion completed. $Script:Items emails removed using $purgeType." -Level SUCCESS
         Write-Host "`nScreenshot this message for your records." -ForegroundColor Cyan
+
+        # Clean up compliance search and action
+        Remove-ComplianceSearchAction -Identity "$Script:RandomIdentity`_Purge" -Confirm:$false -ErrorAction SilentlyContinue
+        Remove-ComplianceSearch -Identity $Script:RandomIdentity -Confirm:$false -ErrorAction SilentlyContinue
 
         if (-not $NonInteractive) { Pause }
     } catch {
