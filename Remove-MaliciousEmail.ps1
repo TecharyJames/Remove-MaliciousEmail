@@ -108,7 +108,10 @@ param(
     [switch]$PreviewOnly,
 
     [Parameter(Mandatory = $false)]
-    [switch]$NonInteractive
+    [switch]$NonInteractive,
+
+    [Parameter(Mandatory = $false)]
+    [string]$CustomerDomain
 )
 
 # ===== Initialize Paths =====
@@ -737,10 +740,29 @@ try {
     # Ignore disconnection errors
 }
 
-# Connect to Exchange Online Security & Compliance Center
+$connectParams = @{ EnableSearchOnlySession = $true; ErrorAction = 'Stop' }
+
+if ($NonInteractive) {
+    if ($CustomerDomain) {
+        $connectParams['DelegatedOrganization'] = $CustomerDomain
+    }
+} else {
+    $choices = @(
+        [System.Management.Automation.Host.ChoiceDescription]::new('&Customer', 'Connect to a customer tenant')
+        [System.Management.Automation.Host.ChoiceDescription]::new('&Own', 'Connect to your own tenant')
+    )
+
+    $CustOrOwn = $Host.UI.PromptForChoice('Tenant Selection', 'Which tenant do you want to connect to?', $choices, 0)
+
+    if ($CustOrOwn -eq 0) {
+        $CustomerDomain = Read-Host "Enter the customer's Microsoft domain (this could be their email domain or .onmicrosoft.com domain - check the CIPP tenant selector for the correct value)"
+        $connectParams['DelegatedOrganization'] = $CustomerDomain
+    }
+}
+
 Write-Log "Connecting to Exchange Online Security & Compliance Center..." -Level INFO
 try {
-    Connect-IPPSSession -EnableSearchOnlySession -ErrorAction Stop
+    Connect-IPPSSession @connectParams
     Write-Log "Connected successfully." -Level SUCCESS
 } catch {
     Write-Log "Failed to connect to Exchange Online: $_" -Level ERROR
